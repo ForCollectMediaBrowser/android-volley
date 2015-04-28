@@ -104,24 +104,32 @@ public class DiskBasedCache implements Cache {
      */
     @Override
     public synchronized Entry get(String key) {
+
         CacheHeader entry = mEntries.get(key);
-        // if the entry does not exist, return.
-        if (entry == null) {
+        File file = getFileForKey(key);
+        if (entry == null && !file.exists()) { // EXTRA CHECK
+            // if the entry does not exist, return.
+            VolleyLog.d("VolleyDiskBasedCache miss for %s", key);
             return null;
         }
 
-        File file = getFileForKey(key);
+        boolean ny = entry == null; // DR ÆNDRING
         CountingInputStream cis = null;
         try {
             cis = new CountingInputStream(new FileInputStream(file));
-            CacheHeader.readHeader(cis); // eat header
+            CacheHeader nyEntry = CacheHeader.readHeader(cis); // eat header
             byte[] data = streamToBytes(cis, (int) (file.length() - cis.bytesRead));
+            if (ny) { // DR ÆNDRING
+                VolleyLog.d("VolleyDiskBasedCache fil0-hit for %s", key);
+                entry = nyEntry;
+                entry.size = file.length();
+                putEntry(entry.key, entry);
+                file.setLastModified(System.currentTimeMillis()); // Opdatér tidsstempel så vi kan se den er blevet brugt
+            } else {
+                VolleyLog.d("VolleyDiskBasedCache fil1-hit for %s", key);
+            }
             return entry.toCacheEntry(data);
         } catch (IOException e) {
-            VolleyLog.d("%s: %s", file.getAbsolutePath(), e.toString());
-            remove(key);
-            return null;
-        }  catch (NegativeArraySizeException e) {
             VolleyLog.d("%s: %s", file.getAbsolutePath(), e.toString());
             remove(key);
             return null;
@@ -145,31 +153,6 @@ public class DiskBasedCache implements Cache {
         if (!mRootDirectory.exists()) {
             if (!mRootDirectory.mkdirs()) {
                 VolleyLog.e("Unable to create cache dir %s", mRootDirectory.getAbsolutePath());
-            }
-            return;
-        }
-
-        File[] files = mRootDirectory.listFiles();
-        if (files == null) {
-            return;
-        }
-        for (File file : files) {
-            BufferedInputStream fis = null;
-            try {
-                fis = new BufferedInputStream(new FileInputStream(file));
-                CacheHeader entry = CacheHeader.readHeader(fis);
-                entry.size = file.length();
-                putEntry(entry.key, entry);
-            } catch (IOException e) {
-                if (file != null) {
-                   file.delete();
-                }
-            } finally {
-                try {
-                    if (fis != null) {
-                        fis.close();
-                    }
-                } catch (IOException ignored) { }
             }
         }
     }
